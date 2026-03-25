@@ -1,12 +1,7 @@
 {
-  "functions": {
-    "api/index.go": {
-      "runtime": "go1.22"
-    }
-  },
   "routes": [
     {
-      "src": "/.*",
+      "src": "/(.*)",
       "dest": "/api/index.go"
     }
   ]
