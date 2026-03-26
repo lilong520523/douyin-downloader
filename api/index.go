@@ -11,6 +11,7 @@ import (
 
 const (
 	userAgent = "Mozilla/5.0 (Linux; U; Android 8.1.0; zh-cn; BLA-AL00 Build/HUAWEIBLA-AL00) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/57.0.2987.132 MQQBrowser/8.9 Mobile Safari/537.36"
+	PASSWORD  = "as123456" // 验证密码
 )
 
 // 从分享文本中提取第一个URL
@@ -145,8 +146,56 @@ func downloadVideo(w http.ResponseWriter, videoURL string) error {
 	return err
 }
 
-// 首页页面
-func indexPage() string {
+// 密码输入界面（只显示：拨号按钮 + 密码框）
+func loginPage(errorMsg string) string {
+	errHtml := ""
+	if errorMsg != "" {
+		errHtml = `<p style="color:red;text-align:center;">` + errorMsg + `</p>`
+	}
+
+	return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>验证</title>
+    <style>
+        body {font-family: 'Segoe UI',sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin:0; padding:0; display:flex; justify-content:center; align-items:center; height:100vh;}
+        .container {background:white; border-radius:10px; box-shadow:0 10px 25px rgba(0,0,0,0.1); padding:40px; width:90%; max-width:500px;}
+        h2 {text-align:center; color:#333; margin-bottom:25px;}
+        .form-item {margin-bottom:20px;}
+        label {font-size:14px; font-weight:600; color:#555; margin-bottom:8px; display:block;}
+        input {padding:12px 15px; border:1px solid #ddd; border-radius:5px; font-size:16px; width:100%; box-sizing:border-box;}
+        .btn {width:100%; padding:14px; border:none; border-radius:8px; font-size:16px; font-weight:bold; cursor:pointer; margin-top:10px;}
+        .submit-btn {background:#667eea; color:white;}
+        .call-btn {background:#25D366; color:white; margin-top:15px;}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>请输入密码</h2>
+        ` + errHtml + `
+        <form method="post">
+            <div class="form-item">
+                <label>密码</label>
+                <input type="password" name="password" placeholder="请输入密码" required>
+            </div>
+            <button type="submit" class="btn submit-btn">进入工具</button>
+        </form>
+
+        <!-- 拨号按钮 -->
+        <a href="tel:18568561913" style="text-decoration:none;">
+            <button class="btn call-btn">📞 联系客服</button>
+        </a>
+    </div>
+</body>
+</html>
+    `
+}
+
+// 视频下载主界面
+func mainPage() string {
 	return `
 <!DOCTYPE html>
 <html>
@@ -188,47 +237,55 @@ func indexPage() string {
 
 // Vercel 入口函数
 func Handler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, indexPage())
-		return
-	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
+	// 密码验证
 	if r.Method == http.MethodPost {
 		r.ParseForm()
-		input := strings.TrimSpace(r.FormValue("url"))
-		if input == "" {
-			http.Error(w, "请输入链接", http.StatusBadRequest)
+		pwd := strings.TrimSpace(r.FormValue("password"))
+		videoUrl := strings.TrimSpace(r.FormValue("url"))
+
+		// 处理密码提交
+		if pwd != "" {
+			if pwd == PASSWORD {
+				fmt.Fprint(w, mainPage())
+				return
+			}
+			fmt.Fprint(w, loginPage("密码错误，请重试"))
 			return
 		}
 
-		videoPageURL := extractURL(input)
-		if videoPageURL == "" {
-			http.Error(w, "未检测到有效链接", http.StatusBadRequest)
+		// 处理视频下载
+		if videoUrl != "" {
+			videoPageURL := extractURL(videoUrl)
+			if videoPageURL == "" {
+				http.Error(w, "未检测到有效链接", http.StatusBadRequest)
+				return
+			}
+
+			redirectedURL, err := getRedirectedURL(videoPageURL)
+			if err != nil {
+				http.Error(w, "解析失败："+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			realURL, err := getVideoRealURL(redirectedURL)
+			if err != nil {
+				http.Error(w, "获取视频失败："+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			videoID := extractVideoID(videoPageURL)
+			if videoID == "" {
+				videoID = "douyin"
+			}
+
+			w.Header().Set("Content-Disposition", "attachment; filename="+videoID+".mp4")
+			_ = downloadVideo(w, realURL)
 			return
 		}
-
-		redirectedURL, err := getRedirectedURL(videoPageURL)
-		if err != nil {
-			http.Error(w, "解析失败："+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		realURL, err := getVideoRealURL(redirectedURL)
-		if err != nil {
-			http.Error(w, "获取视频失败："+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		videoID := extractVideoID(videoPageURL)
-		if videoID == "" {
-			videoID = "douyin"
-		}
-
-		w.Header().Set("Content-Disposition", "attachment; filename="+videoID+".mp4")
-		_ = downloadVideo(w, realURL)
-		return
 	}
 
-	http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+	// 默认显示密码界面
+	fmt.Fprint(w, loginPage(""))
 }
